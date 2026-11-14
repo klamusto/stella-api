@@ -1,21 +1,26 @@
 name: update-servers
 
 on:
+  # Backup restarter only. The real cadence comes from refresh_loop.py, which
+  # re-queues this workflow every few minutes because GitHub's scheduler can
+  # delay or silently skip */5 ticks.
   schedule:
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: update-servers
+  # Never kill a run mid-commit; a queued run starts right after it ends.
   cancel-in-progress: false
 
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
 
@@ -26,17 +31,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Fetch and decode
-        run: python fetch_servers.py
-
-      - name: Commit servers.json
-        run: |
-          git config user.name "stella-api-bot"
-          git config user.email "stella-api-bot@users.noreply.github.com"
-          if git diff --quiet -- servers.json cache.json; then
-            echo "no changes"
-            exit 0
-          fi
-          git add servers.json cache.json
-          git commit -m "servers: $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push
+      - name: Refresh every 5 minutes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REFRESH_SECONDS: "300"
+          REFRESH_ROUNDS: "9"
+          REFRESH_WORKFLOW: "update-servers.yml"
+          REFRESH_REF: "main"
+        run: python refresh_loop.py
